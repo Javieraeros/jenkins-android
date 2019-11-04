@@ -1,0 +1,548 @@
+#!groovy
+//Jenkinsfile (Declarative Pipeline)
+
+// ------------------------------------
+// -- Variables Configuration
+// ------------------------------------
+// --------------------------------------------------------------
+// -- Internal Variables to be used on the different Stages.
+// --------------------------------------------------------------
+// -- APK Name. It's created with the version and build.
+def JOB_APK_NAME
+def JOB_APK_FOLDER
+def JOB_BUILD_TYPE
+
+import java.text.SimpleDateFormat
+import java.util.Random
+def dateFormat = new SimpleDateFormat("dd_MM_yyyy-HH_mm")
+def date = new Date()
+def JOB_TAG_NAME = dateFormat.format(date)
+
+// -- Keep only 50 builds
+echo 'Discard old build'
+properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '',
+    daysToKeepStr: '', numToKeepStr: "50"))])
+
+pipeline {
+
+    environment {
+        ANDROID_HOME='/home/jenkins/'
+        PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+        LANG="en_US.UTF-8"
+    }
+
+    agent {
+       dockerfile {
+            filename 'Dockerfiles/sdos_android.dockerfile'
+            // args '-v JENKINS_9001_GRADLE:/root/.gradle -v JENKINS_9001_ANDROID:/root/.android/ -v JENKINS_9001_HOME:/home/jenkins/'
+            // args '-v JENKINS_9001_GRADLE_CACHES_MODULES_2:/root/.gradle/caches/modules-2/files-2.1 -v JENKINS_9001_ANDROID:/root/.android/ -v JENKINS_9001_HOME:/home/jenkins/'
+            args '-v JENKINS_9001_GRADLE_CACHES_RESOURCES_2_1:/root/.gradle/caches/modules-2/resources-2.1 -v JENKINS_9001_GRADLE_CACHES_MODULES_2:/root/.gradle/caches/modules-2/files-2.1 -v JENKINS_9001_ANDROID:/root/.android/ -v JENKINS_9001_HOME:/home/jenkins/'
+       }
+    }
+    // -- Display a timestamp on the log.
+    options{
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+       // ------------------------------------
+       // -- STAGE: Clean Workspace
+       // ------------------------------------
+       stage('Clean Workspace') {
+            steps {
+                // -- Clean Workspace
+                echo 'Clean Workspace'
+                cleanWs()
+            }
+       }
+
+       // -- Parameters needed: JOB_GIT_BRANCH, JOB_GIT_URL
+       // --------------------------------
+       // -- STAGE: Download GIT Code
+       // --------------------------------
+       stage('Download GIT Code') {
+            steps {
+                updateGitlabCommitStatus state: 'running'
+                script {
+                    try {
+                        //-- Download GIT Code
+                        echo "Downloading GIT Code from: ${JOB_GIT_URL}. Branch: ${JOB_GIT_BRANCH}"
+
+                        //-- Git checkout
+                        git branch: "${JOB_GIT_BRANCH}", changelog: false, credentialsId: "${env.JOB_GIT_CREDENTIAL}", poll: false, url: "${JOB_GIT_URL}"
+
+                    } catch (err) {
+                        echo "The Download Git Code Stage failed"
+                    }
+                }
+            }
+        }
+
+       // -- Parameters needed: JOB_BUILD_TYPE
+       // ------------------------------------
+       // -- STAGE: Load properties
+       // ------------------------------------
+       stage('Load Properties') {
+            steps {
+                script {
+                    try {
+                        // -- Load values from the properties.
+                        JOB_BUILD_TYPE = JOB_PROPERTIES_FILE
+                        echo 'Loading properties'
+                        load "${WORKSPACE}/jenkins/environment/${JOB_BUILD_TYPE}.properties"
+                        echo "Load ${JOB_BUILD_TYPE}.properties"
+                    } catch (err) {
+                        echo "The Load Properties Stage failed"
+                    }
+                }
+            }
+       }
+
+               // -- Parameters needed: JOB_COMPILE_FLAVOR, JOB_COMPILE_TYPE
+        // -------------------------------------
+        // -- STAGE: Android Test
+        // -------------------------------------
+        stage('Android Test'){
+            when {
+                expression { return PIPELINE_ANDROID_TEST_ENABLE == "true" }
+            }
+            steps {
+                script {
+
+                    try {
+
+                         //-- Set execution permission to the gradlew file.
+                        sh '''
+                            cd .
+                            chmod +x ./gradlew
+                        '''
+
+                        // -- Remove the possibility to connect into a display
+                        sh "unset DISPLAY"
+
+
+                        //-- Run Android Lint
+
+                        echo 'Executing Android Test and publishing the Android Test results '
+
+                        sh "./gradlew test$JOB_COMPILE_FLAVOR$JOB_COMPILE_TYPE"
+
+                    } catch (err) {
+
+                        echo "The Android Lint Stage failed"
+
+                    }
+                }
+            }
+        }
+
+        // -- Parameters needed: JOB_COMPILE_FLAVOR, JOB_COMPILE_TYPE
+        // -------------------------------------
+        // -- STAGE: Android Lint
+        // -------------------------------------
+        stage('Android Lint'){
+            when {
+                expression { return PIPELINE_ANDROID_LINT_ENABLE == "true" }
+            }
+            steps {
+                script {
+
+                    try {
+
+                         //-- Set execution permission to the gradlew file.
+                        sh '''
+                            cd .
+                            chmod +x ./gradlew
+                        '''
+
+                        // -- Remove the possibility to connect into a display
+                        sh "unset DISPLAY"
+
+
+                        //-- Run Android Lint
+
+                        echo 'Executing Android Lint and publishing the Android Lint results '
+
+                        sh "./gradlew lint$JOB_COMPILE_FLAVOR$JOB_COMPILE_TYPE"
+                        // androidLint defaultEncoding: 'UTF-8', failedNewHigh: '10', failedTotalHigh: '30', healthy: '', pattern: '**/lint-results*.xml', thresholdLimit: 'high', unHealthy: '', unstableNewHigh: '5', unstableTotalHigh: '10'
+
+                        androidLint()
+
+                    } catch (err) {
+
+                        echo "The Android Lint Stage failed"
+
+                    }
+                }
+            }
+        }
+
+       // -- Parameters needed: JOB_COMPILE_FLAVOR, JOB_COMPILE_TYPE
+       // ------------------------------------
+       // -- STAGE: Build APK
+       // ------------------------------------
+       stage('Build APK') {
+            when {
+                expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
+            }
+            steps {
+                script {
+                            //-- Building
+                            echo 'Building APK'
+
+                            //-- Set execution permission to the gradlew file.
+                            sh '''
+                                cd .
+                                chmod +x ./gradlew
+                            '''
+
+                            // -- Remove the possibility to connect into a display
+                            sh "unset DISPLAY"
+
+
+                            // -- Increase Java memory by default, to secure the build process
+                            sh """
+                            touch gradle.properties
+                            echo "org.gradle.jvmargs=-Xmx2048m -XX:MaxPermSize=512m -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8
+                            org.gradle.daemon=false
+                            org.gradle.parallel=false" >> gradle.properties
+                            """
+
+                            //-- Building APK
+                            sh "./gradlew assemble$JOB_COMPILE_FLAVOR$JOB_COMPILE_TYPE --stacktrace"
+
+
+                }
+            }
+        }
+
+        // -----------------------------------------------
+        // -- STAGE: Get APK Name
+        // -----------------------------------------------
+        stage('Get APK Name'){
+            when {
+                expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
+            }
+            steps {
+                script {
+                    try {
+                        // -- Search the *.apk generated on the /apks directory
+                        echo 'Searching all the *.apk files generated on the /apks directory'
+                        JOB_APK_FOLDER = "${WORKSPACE}/apks"
+                        JOB_APK_NAME = sh (returnStdout: true, script: 'ls -t  "${WORKSPACE}/apks" | grep .apk | head -n1').trim()                        echo "The APK name is: ${JOB_APK_NAME}"
+                        JOB_TAG_NAME = sh (returnStdout: true, script: 'ls -t  "${WORKSPACE}/apks" | grep .apk | head -n1 | tr " " _ ').trim()
+                        echo "The Tag name is: ${JOB_TAG_NAME}"
+                    } catch (err) {
+                        echo "The Get APK Name Stage failed"
+                    }
+                }
+            }
+        }
+
+       // ------------------------------------
+       // -- STAGE: Archive APK
+       // ------------------------------------
+       stage('Archive APK') {
+            when {
+                expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
+            }
+            steps {
+                script {
+                    try {
+                        //-- Archive the apk artifacts.
+                        archiveArtifacts "**/apks/*.apk"
+                        echo "The artifacts were archives successfully"
+                    } catch (err) {
+                        echo "The Archive APK Stage failed"
+                    }
+                }
+            }
+       }
+
+       // -- Parameters needed: PIPELINE_SONAR_ENABLE, SONAR_HOST_URL, SONAR_AUTH_TOKEN
+       // -------------------------------------------
+       // -- STAGE: SonarQube
+       // ------------------------------------------
+       stage('SonarQube') {
+            when {
+                expression { return PIPELINE_SONAR_ENABLE == "true" }
+            }
+            steps {
+                script {
+                    try {
+						echo 'Analizing the project with SonarQube'
+						withSonarQubeEnv('Sonar SDOS') {
+							// Requires SonarQube Scanner for Gradle 2.1+
+							// It's important to add --info because of SONARJNKNS-281
+							sh "./gradlew --info --stacktrace sonarqube"
+						}
+					} catch (err) {
+						echo "The SonarQube analysis failed"
+					}
+
+                }
+            }
+       }
+
+        // -- Parameters needed: PIPELINE_MONKEY_ENABLE, PACKAGE_NAME, ANDROID_SDK, INTERVAL, TIMES
+        // -- Parameters suggested: ANDROID_VERSION
+        // -------------------------------------------
+        // -- STAGE: Monkey
+        // ------------------------------------------
+        stage('Monkey') {
+            when {
+                expression { return PIPELINE_MONKEY_ENABLE == "true" }
+            }
+            stage ('Run emulator') {
+                steps {
+                    script {
+
+                        ANDROID_VERSION = "android-26"
+                        if (ANDROID_VERSION == null) {
+                            ANDROID_VERSION = "android-22"
+                        } else if (((String) ANDROID_VERSION).matches("(.*)2[7-9]") || ((String) ANDROID_VERSION).matches("(.*)3[0-9]")) {
+                            ANDROID_VERSION = "android-22"
+                        }
+                        ARCHITECTURE = "x86"
+                        AVD_NAME = ANDROID_VERSION + "_" + ARCHITECTURE
+                        INSTALL_PLATFORM = "system-images;$ANDROID_VERSION;google_apis;$ARCHITECTURE"
+                        INSTALL_PLATFORM = """\"$INSTALL_PLATFORM\""""
+
+                        sh "$ANDROID_SDK/platform-tools/adb kill-server"
+                        sh "$ANDROID_SDK/platform-tools/adb start-server"
+                        sh "$ANDROID_SDK/tools/bin/sdkmanager --install $INSTALL_PLATFORM"
+
+                        sh """
+                            echo "no" | ${ANDROID_SDK}/tools/bin/avdmanager -s create avd -f -n ${AVD_NAME} -k ${INSTALL_PLATFORM}
+                            ${ANDROID_SDK}/tools/emulator -skin 1280x800 -ports 5782,5783 -prop persist.sys.language=es -prop persist.sys.country=ES -avd ${AVD_NAME} -no-window & > emulator.log
+                            ${ANDROID_SDK}/platform-tools/adb wait-for-device shell getprop init.svc.bootanim
+                        """
+                        waitUntil {
+                            script {
+                                def r = sh (script: "${ANDROID_SDK}/platform-tools/adb shell getprop init.svc.bootanim", returnStdout: true).trim()
+                                return (r == "stopped")
+                            }
+                        }
+                    }
+                }
+            }
+            stage('Installation') {
+                steps {
+                    script {
+
+                        Random random = new Random()
+                        def randomNumber = random.nextInt(10000000)
+                        INTERVAL = 10
+                        TIMES = 1000
+                        RANDOM_NUMBER = randomNumber
+                        echo "randomNumber $RANDOM_NUMBER"
+                        sh "$ANDROID_SDK/platform-tools/adb install -r '$JOB_APK_FOLDER/$JOB_APK_NAME'"
+                        sh "$ANDROID_SDK/platform-tools/adb shell monkey -v -s $RANDOM_NUMBER --throttle $INTERVAL -p es.sdos.sdosproject.test $TIMES >> '$JOB_APK_NAME'.log"
+                    }
+                }
+            }
+            stage('Emulator kill') {
+                steps {
+                    script {
+                        sh """
+                            ${ANDROID_SDK}/platform-tools/adb devices | grep "emulator-" | while read -r emulator device; do
+                            ${ANDROID_SDK}/platform-tools/adb -s \$emulator emu kill
+                            done
+                        """
+                    }
+                }
+            }
+        }
+
+       // -- Parameters needed: PIPELINE_FABRIC_UPLOAD, JOB_APK_FOLDER, JOB_APK_NAME, JOB_FABRIC_NOTIFY_EMAIL
+       // -----------------------------------
+       // -- Stage: Fabric
+       // ------------------------------------
+       stage('Fabric') {
+            when {
+                expression { return PIPELINE_FABRIC_UPLOAD == "true" }
+            }
+            steps {
+                // -- Upload the APK into Fabric
+                echo 'Uploading the apk into Fabric'
+                fabric apiKey: "$PIPELINE_FABRIC_API",
+                apkPath: "$JOB_APK_FOLDER/$JOB_APK_NAME",
+                buildSecret: "$PIPELINE_FABRIC_SECRET",
+                notifyTestersType: 'NOTIFY_TESTERS_EMAILS',
+                organization: "$PIPELINE_FABRIC_ORGANIZATION",
+                releaseNotesFile: '',
+                releaseNotesParameter: "$JOB_FABRIC_RELEASE_NOTES",
+                releaseNotesType: 'RELEASE_NOTES_PARAMETER',
+                testersEmails: "$JOB_FABRIC_NOTIFY_EMAIL",
+                testersGroup: '',
+                useAntStyleInclude: false
+            }
+
+      }
+
+       // -- Parameters needed: PIPELINE_GIT_CREATE_TAG, JOB_APK_NAME
+       //------------------------------------
+       //-- STAGE: Create a TAG
+       //------------------------------------
+      stage('GIT TAG') {
+            when {
+                expression { return PIPELINE_GIT_CREATE_TAG == "true" }
+            }
+            steps {
+                // -- Create the Git Tag.
+                sh "curl --header 'PRIVATE-TOKEN: gWXKNU-ZVk74c1j8vrCz' -X POST 'https://git.sdos.es/api/v4/projects/${JOB_GIT_ID_PROJECT}/repository/tags?tag_name=$JOB_TAG_NAME&ref=${JOB_GIT_BRANCH}'"
+            }
+        }
+    }// -- Fin stages
+
+    // -- Parameters needed: JOB_EMAIL_NOTIFICATION, JOB_SLACK_CHANNEL_NOTIFICATION, JOB_NAME, BUILD_NUMBER, BUILD_URL, BUILD_STATUS,
+    // JOB_COMPILE_TYPE, JOB_COMPILE_FLAVOR, JOB_GIT_BRANCH, WORKSPACE, CHANGES
+    // ----------------------------------------------
+    // -- STAGE: Post Build actions (e-mail y Slack)
+    // ----------------------------------------------
+    post ('Post-Build Actions'){
+        always {
+            //-- Delete Directory
+            echo 'Delete Directory'
+            // deleteDir()
+        }
+        // -- If the build finished successfuly, an E-mail and a Slack notification is send.
+        success ('JOB SUCCESS'){
+            updateGitlabCommitStatus state: 'success'
+            sh 'echo Success Job'
+            slackSend botUser: false, color: "#a4c639", channel: "#"+"${JOB_SLACK_CHANNEL_NOTIFICATION}", message: "`${JOB_NAME}`, `${BUILD_NUMBER}` finished successfully (<${env.BUILD_URL}|Open>) \n Build Type: `${JOB_COMPILE_TYPE}`, Flavor: `${JOB_COMPILE_FLAVOR}`, Branch: `${JOB_GIT_BRANCH}`"
+
+            script {
+
+                if (PIPELINE_EMAIL_NOTIFICATION == "true") {
+
+                    emailext attachLog: true, body: '''<html>
+
+                    <p> Hello. </p> 
+
+                    <p>This mail is auto-generated as part of the Jenkins execution of the project <b>${JOB_NAME}</b> </p>
+
+                    <h2> BUILD DETAILS: </h2> 
+
+                    <p>
+                        <b>Project Name:</b> ${JOB_NAME}<br> 
+                        <b>Build URL:</b> ${BUILD_URL}<br>
+                        <b> Build Number: </b> ${BUILD_NUMBER} <br>
+                        <b>Build Status: </b>${BUILD_STATUS}<br>
+                        <b>Type: </b>${JOB_COMPILE_TYPE}<br>
+                        <b>Flavor: </b>${JOB_COMPILE_FLAVOR}<br>
+                        <b>Branch: </b>${JOB_GIT_BRANCH} <br>
+                        <b>Download APK: </b> ${BUILD_URL}/lastSuccessfulBuild/artifact/apks/ <br>
+                        <b>Log:</b> The log file is attached into this e-mail. <br>
+                        <b>Log URL:</b>  ${BUILD_URL}${JOB_NAME}/lastBuild/console <br>
+                        <b>Changes: </b> ${CHANGES, format="List of changes: <li><ul>[%a] %m </ul><ul> [Date:] %d </ul> <ul> [Revision:] %r </ul></li> <br>"} <br>
+                
+                    </p>
+
+                    <p> Thank you & Regards. </p>
+
+                    </html>''', subject: "[JENKINS] Result of Build ${BUILD_NUMBER} ${JOB_NAME}.", to: "${JOB_EMAIL_NOTIFICATION}"
+
+                }
+
+            }
+
+        }
+
+         // -- If the build finished with a failure, an E-mail and a Slack notification is send.
+        failure ('JOB FAILURE'){
+            updateGitlabCommitStatus state: 'failed'
+            sh 'echo Failure Job'
+            slackSend botUser: false, color: "#d6280d", channel: "#"+"${JOB_SLACK_CHANNEL_NOTIFICATION}", message: "`${JOB_NAME}`, `${BUILD_NUMBER}` finished with a failure (<${env.BUILD_URL}|Open>) \n Build Type: `${JOB_COMPILE_TYPE}`, Flavor: `${JOB_COMPILE_FLAVOR}`, Branch: `${JOB_GIT_BRANCH}`"
+
+            script {
+
+                if (PIPELINE_EMAIL_NOTIFICATION == "true") {
+
+                    emailext attachLog: true, body: '''<html>
+
+                    <p> Hello. </p> 
+    
+                    <p>This mail is auto-generated as part of the Jenkins execution of the project <b>${JOB_NAME}</b> </p>
+
+                    <h2> BUILD DETAILS: </h2> 
+
+                    <p>
+                        <b>Project Name:</b> ${JOB_NAME}<br> 
+                        <b>Build URL:</b> ${BUILD_URL}<br>
+                        <b> Build Number: </b> ${BUILD_NUMBER} <br>
+                        <b>Build Status: </b>${BUILD_STATUS}<br>
+                        <b>Type: </b>${JOB_COMPILE_TYPE}<br>
+                        <b>Flavor: </b>${JOB_COMPILE_FLAVOR}<br>
+                        <b>Branch: </b>${JOB_GIT_BRANCH} <br>
+                        <b>Download APK: </b> ${BUILD_URL}/lastSuccessfulBuild/artifact/apks/ <br>
+                        <b>Log:</b> The log file is attached into this e-mail. <br>
+                        <b>Log URL:</b>  ${BUILD_URL}${JOB_NAME}/lastBuild/console <br>
+                        <b>Changes: </b> ${CHANGES, format="List of changes: <li><ul>[%a] %m </ul><ul> [Date:] %d </ul> <ul> [Revision:] %r </ul></li> <br>"} <br>
+                
+                    </p>
+
+                    <p> Thank you & Regards. </p>
+
+                    </html>''', subject: '[JENKINS] Result of Build ${BUILD_NUMBER} ${JOB_NAME}.', to: '$JOB_EMAIL_NOTIFICATION'
+                }
+
+
+            }
+
+        }
+
+         // -- If the build finished aborted, an E-mail and a Slack notification is send.
+        aborted ('JOB ABORTED') {
+            updateGitlabCommitStatus state: 'canceled'
+            sh 'echo Aborted Job'
+            slackSend botUser: false, color: "#bacd19", channel: "#"+"${JOB_SLACK_CHANNEL_NOTIFICATION}", message: "`${JOB_NAME}`, `${BUILD_NUMBER}` was aborted (<${env.BUILD_URL}|Open>) \n Build Type: `${JOB_COMPILE_TYPE}`, Flavor: `${JOB_COMPILE_FLAVOR}`, Branch: `${JOB_GIT_BRANCH}`"
+
+            script{
+
+                if (PIPELINE_EMAIL_NOTIFICATION == "true") {
+
+                    emailext attachLog: true, body: '''<html>
+
+                    <p> Hello. </p> 
+
+                    <p>This mail is auto-generated as part of the Jenkins execution of the project <b>${JOB_NAME}</b> </p>
+
+                    <h2> BUILD DETAILS: </h2>   
+
+                    <p>
+                        <b>Project Name:</b> ${JOB_NAME}<br> 
+                        <b>Build URL:</b> ${BUILD_URL}<br>
+                        <b> Build Number: </b> ${BUILD_NUMBER} <br>
+                        <b>Build Status: </b>${BUILD_STATUS}<br>
+                        <b>Type: </b>${JOB_COMPILE_TYPE}<br>
+                        <b>Flavor: </b>${JOB_COMPILE_FLAVOR}<br>
+                        <b>Branch: </b>${JOB_GIT_BRANCH} <br>
+                        <b>Download APK: </b> ${BUILD_URL}/lastSuccessfulBuild/artifact/apks/ <br>
+                        <b>Log:</b> The log file is attached into this e-mail. <br>
+                        <b>Log URL:</b>  ${BUILD_URL}${JOB_NAME}/lastBuild/console <br>
+                        <b>Changes: </b> ${CHANGES, format="List of changes: <li><ul>[%a] %m </ul><ul> [Date:] %d </ul> <ul> [Revision:] %r </ul></li> <br>"} <br>
+                
+                    </p>
+
+                    <p> Thank you & Regards. </p>
+    
+                    </html>''', subject: '[JENKINS] Result of Build ${BUILD_NUMBER} ${JOB_NAME}.', to: '$JOB_EMAIL_NOTIFICATION'
+
+              }
+
+            }
+
+        }
+
+        unstable ('JOB UNSTABLE') {
+            updateGitlabCommitStatus state: 'failed'
+            sh 'echo Unstable Job'
+            slackSend botUser: false, color: "#fded72", channel: "#"+"${JOB_SLACK_CHANNEL_NOTIFICATION}", message: "The Pipeline: `${JOB_NAME}`, `${BUILD_NUMBER}` finished unstable (<${env.BUILD_URL}|Open>)"
+        }
+    }
+}// -- Fin Pipeline
+
+
