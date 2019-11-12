@@ -252,4 +252,5 @@ pipeline {
                 }
             }
        }
+    }
 }// -- Fin Pipeline
