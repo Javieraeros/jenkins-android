@@ -38,7 +38,6 @@ pipeline {
     agent {
       docker {
         image 'bitriseio/docker-android'
-        args '--entrypoint=""'
       }
     }
 
