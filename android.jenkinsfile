@@ -37,7 +37,7 @@ pipeline {
     }
     agent {
       docker {
-        image 'bitriseio/docker-android'
+        image 'debian'
       }
     }
 
