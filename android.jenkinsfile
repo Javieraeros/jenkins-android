@@ -35,11 +35,7 @@ pipeline {
         timestamps()
         disableConcurrentBuilds()
     }
-    agent {
-      docker {
-        image 'debian'
-      }
-    }
+    agent any
 
     stages {
 
@@ -96,6 +92,9 @@ pipeline {
         // -- STAGE: Android Test
         // -------------------------------------
         stage('Android Test'){
+            docker {
+              image 'bitriseio/docker-android'
+            }
             when {
                 expression { return PIPELINE_ANDROID_TEST_ENABLE == "true" }
             }
@@ -134,6 +133,9 @@ pipeline {
         // -- STAGE: Android Lint
         // -------------------------------------
         stage('Android Lint'){
+            docker {
+              image 'bitriseio/docker-android'
+            }
             when {
                 expression { return PIPELINE_ANDROID_LINT_ENABLE == "true" }
             }
@@ -175,6 +177,9 @@ pipeline {
        // -- STAGE: Build APK
        // ------------------------------------
        stage('Build APK') {
+            docker {
+              image 'bitriseio/docker-android'
+            }
             when {
                 expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
             }
