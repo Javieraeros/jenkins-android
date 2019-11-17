@@ -26,7 +26,7 @@ properties([buildDiscarder(logRotator(artifactDaysToKeepStr: '', artifactNumToKe
 pipeline {
 
     environment {
-        ANDROID_HOME='/home/jenkins/'
+        ANDROID_HOME='/var/jenkins_home/Android/Sdk'
         PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
         LANG="en_US.UTF-8"
     }
