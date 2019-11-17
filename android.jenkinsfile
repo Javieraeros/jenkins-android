@@ -58,7 +58,7 @@ pipeline {
                 script {
                     try {
                         echo "Downloading GIT Code from: ${JOB_GIT_URL}. Branch: ${JOB_GIT_BRANCH}"
-                        git branch: "${JOB_GIT_BRANCH}", changelog: false, poll: false, url: "${JOB_GIT_URL}"
+                        git branch: "${JOB_GIT_BRANCH}",  changelog: false, poll: false, url: "${JOB_GIT_URL}"
 
                     } catch (err) {
                         echo "The Download Git Code Stage failed"
@@ -92,11 +92,6 @@ pipeline {
         // -- STAGE: Android Test
         // -------------------------------------
         stage('Android Test'){
-            agent {
-              docker {
-                image 'bitriseio/docker-android'
-              }
-            }
             when {
                 expression { return PIPELINE_ANDROID_TEST_ENABLE == "true" }
             }
@@ -135,11 +130,6 @@ pipeline {
         // -- STAGE: Android Lint
         // -------------------------------------
         stage('Android Lint'){
-        agent {
-          docker {
-            image 'bitriseio/docker-android'
-          }
-        }
             when {
                 expression { return PIPELINE_ANDROID_LINT_ENABLE == "true" }
             }
@@ -181,11 +171,6 @@ pipeline {
        // -- STAGE: Build APK
        // ------------------------------------
        stage('Build APK') {
-       agent {
-         docker {
-           image 'bitriseio/docker-android'
-         }
-       }
             when {
                 expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
             }
