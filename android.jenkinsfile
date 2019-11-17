@@ -92,9 +92,6 @@ pipeline {
         // -- STAGE: Android Test
         // -------------------------------------
         stage('Android Test'){
-            when {
-                expression { return PIPELINE_ANDROID_TEST_ENABLE == "true" }
-            }
             steps {
                 script {
 
@@ -114,7 +111,7 @@ pipeline {
 
                         echo 'Executing Android Test and publishing the Android Test results '
 
-                        sh "./gradlew test$JOB_COMPILE_FLAVOR$JOB_COMPILE_TYPE"
+                        sh "./gradlew test"
 
                     } catch (err) {
 
@@ -130,9 +127,6 @@ pipeline {
         // -- STAGE: Android Lint
         // -------------------------------------
         stage('Android Lint'){
-            when {
-                expression { return PIPELINE_ANDROID_LINT_ENABLE == "true" }
-            }
             steps {
                 script {
 
@@ -152,7 +146,7 @@ pipeline {
 
                         echo 'Executing Android Lint and publishing the Android Lint results '
 
-                        sh "./gradlew lint$JOB_COMPILE_FLAVOR$JOB_COMPILE_TYPE"
+                        sh "./gradlew lint"
                         // androidLint defaultEncoding: 'UTF-8', failedNewHigh: '10', failedTotalHigh: '30', healthy: '', pattern: '**/lint-results*.xml', thresholdLimit: 'high', unHealthy: '', unstableNewHigh: '5', unstableTotalHigh: '10'
 
                         androidLint()
@@ -171,9 +165,6 @@ pipeline {
        // -- STAGE: Build APK
        // ------------------------------------
        stage('Build APK') {
-            when {
-                expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
-            }
             steps {
                 script {
                             //-- Building
@@ -198,7 +189,7 @@ pipeline {
                             """
 
                             //-- Building APK
-                            sh "./gradlew assemble$JOB_COMPILE_FLAVOR$JOB_COMPILE_TYPE --stacktrace"
+                            sh "./gradlew assemble --stacktrace"
 
 
                 }
@@ -209,9 +200,6 @@ pipeline {
         // -- STAGE: Get APK Name
         // -----------------------------------------------
         stage('Get APK Name'){
-            when {
-                expression { return PIPELINE_ANDROID_BUILD_ENABLE == "true" }
-            }
             steps {
                 script {
                     try {
